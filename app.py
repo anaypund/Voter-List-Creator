@@ -12,8 +12,8 @@ def preprocess_and_crop_columns(page_image):
     # Set custom margins
     top_margin = 120
     bottom_margin = 100
-    left_margin = 45
-    right_margin = 30
+    left_margin = 50
+    right_margin = 80
 
     # Apply cropping using the margins
     cropped = page_image.crop((
@@ -25,62 +25,34 @@ def preprocess_and_crop_columns(page_image):
 
     col_width = cropped.width // 3
     columns = []
-
+    LEFT_CUT = 0
     for i in range(3):
         full_col = cropped.crop((i * col_width, 0, (i + 1) * col_width, cropped.height))
-        valuable_width = int((2 / 3) * full_col.width)
-        cleaned_col = full_col.crop((15, 0, valuable_width, full_col.height))
+        valuable_width = int(0.7 * full_col.width)
+        cleaned_col = full_col.crop((LEFT_CUT, 0, valuable_width, full_col.height))
         columns.append(cleaned_col)
 
     return columns
 
-def preprocess_and_crop_cards(page_image):
-    w, h = page_image.size
+def extract_header(page):
+    w, h = page.size
 
-    # Custom margins for full page crop
-    top_margin = 120
-    bottom_margin = 75
-    left_margin = 45
-    right_margin = 30
+    # Set custom margins
+    top_margin = 130
+    bottom_margin =290
+    left_margin = 50
+    right_margin = 50
 
-    # Crop page to remove page-level margins
-    cropped = page_image.crop((
+    # Apply cropping using the margins
+    cropped = page.crop((
         left_margin,
         top_margin,
-        w - right_margin,
-        h - bottom_margin
+        w//2,
+        bottom_margin
     ))
 
-    col_width = cropped.width // 3
-    num_cards_per_col = 10
-    card_images = []
+    return cropped
 
-    for i in range(3):  # 3 vertical columns
-        full_col = cropped.crop((
-            i * col_width,
-            0,
-            (i + 1) * col_width,
-            cropped.height
-        ))
-
-        # Crop out right 1/3 part to avoid "छायाचित्र" and number
-        valuable_width = int((2 / 3) * full_col.width)
-        cleaned_col = full_col.crop((15, 0, valuable_width, full_col.height))
-
-        card_height = cleaned_col.height // num_cards_per_col
-
-        for j in range(num_cards_per_col):
-            card = cleaned_col.crop((
-                0,
-                j * card_height,
-                cleaned_col.width,
-                (j + 1) * card_height
-            ))
-            top_trim = 60  # or 20 depending on font size
-            card = card.crop((0, top_trim, card.width, card.height))
-            card_images.append(card)
-
-    return card_images
 
 def artificially_expand_line_spacing(image, spacing=12, line_padding=10, min_gap=10):
     import numpy as np
@@ -135,8 +107,8 @@ def artificially_expand_line_spacing(image, spacing=12, line_padding=10, min_gap
 
 
 
-def extract_entries(text):
-    entries = re.split(r"(?:^|\n)\s*नाव\s*[:：]?\s*", text)[1:]
+def extract_entries(text, nagar_parishad, prabhag_kr, yaadi_bhaag_kr, booth_address):
+    entries = re.split(r"(?:^|\n)\s*मतदाराचे पूर्ण\s*[:：]?\s*", text)[1:]
 
     parsed = []
     for entry in entries:
@@ -158,12 +130,16 @@ def extract_entries(text):
         gender = extract_field(r"लिंग\s*[:：]?\s*([^\n\d]+)")
 
         parsed.append({
-            "नाव": name,
-            "वडिलांचे नाव": father,
-            "पतीचे नाव": husband,
-            "घर क्रमांक": house_val,
-            "वय": age,
-            "लिंग": gender,
+            "Name": name,
+            "Father Name": father,
+            "Husband Name": husband,
+            "House Number": house_val,
+            "Age": age,
+            "Gender": gender,
+            "Nagar_Parishad": nagar_parishad,
+            "Prabhag_kr": prabhag_kr,
+            "Yaadi_bhaag_kr": yaadi_bhaag_kr,
+            "Booth_address": booth_address,
         })
 
     return parsed
@@ -183,12 +159,39 @@ def clean_ocr_text(text):
         r"\bलिग\b"          : "लिंग",        # Another common variant
         r"छायाचत्र"         : "छायाचित्र",    # Incomplete word
         r":"                : " : ",          # Ensure spacing around colons
+        r"ख्री"              : "स्री",
+        r"स्त्री"              : "स्री",
+        r"घरक्रमांक"          : "घर क्रमांक"
     }
 
     for pattern, repl in replacements.items():
         text = re.sub(pattern, repl, text)
     
     return text
+
+def process_header(header_text):
+    lines = header_text.strip().split("\n")
+
+    # --- 1) Nagar Parishad (first line) ---
+    nagar_parishad = lines[0].strip()
+
+    # --- 2) Prabhag number from second line ---
+    # Looks for first number (Devanagari digits also handled)
+    prabhag_match = re.search(r'(\d+|[०-९]+)', lines[1])
+    prabhag_kr = prabhag_match.group(1) if prabhag_match else None
+
+    # --- 3) Yaadi Bhaag number before ":" ---
+    line3 = lines[2]
+    yaadi_match = re.search(r'क्र\.?\s*([०-९\d]+)', line3)
+    yaadi_bhaag_kr = yaadi_match.group(1) if yaadi_match else None
+
+    # --- 4) Booth address (everything after ":") ---
+    if ":" in line3:
+        booth_address = line3.split(":", 1)[1].strip()
+    else:
+        booth_address = None
+
+    return nagar_parishad, prabhag_kr, yaadi_bhaag_kr, booth_address
 
 
 def preprocess_image(image):
@@ -210,95 +213,45 @@ def preprocess_image(image):
 #     # return image
 
 
+if __name__ == '__main__':
 
-# Load all pages from the PDF
-pdf_path = "raw pdfs\shortened.pdf"
-pages = convert_from_path(pdf_path, dpi=300)[2:4]
+    # Load all pages from the PDF
+    pdf_path = "raw pdfs/FinalList_Ward_2-short.pdf"
+    print(f"Loading pdf {pdf_path}")
+    pages = convert_from_path(pdf_path, dpi=300)
+    print("loaded pdf")
 
-final_data = []
+    final_data = []
 
-index =1
-for page in pages:
-    columns = preprocess_and_crop_columns(page)
-    # for i, img in enumerate(columns):
-    #     img.save(f"imgs/debug_column_{i+1}.png")
-    for col_img in columns:
-        # col_img = preprocess_image(col_img)
-        col_img = artificially_expand_line_spacing(col_img)
-        text = pytesseract.image_to_string(col_img, lang='mar')
+    index =1
+    for idx, page in enumerate(pages, start=1):
+        print(page)
+        # Check Header
+        header = extract_header(page)
+        header.save(f"imgs/Header_{idx}.png")
+        header_text = pytesseract.image_to_string(header, lang='Devanagari+mar')
+        nagar_parishad, prabhag_kr, yaadi_bhaag_kr, booth_address = process_header(header_text)
+        
+        columns = preprocess_and_crop_columns(page)
+        for col_img in columns:
+            # col_img = preprocess_image(col_img)
+            # col_img = artificially_expand_line_spacing(col_img)
+            text = pytesseract.image_to_string(col_img, lang='Devanagari')
 
-        col_img.save(f"imgs/debug_column_{index}.png")
+            col_img.save(f"imgs/debug_column_{index}.png")
 
-        text = clean_ocr_text(text)
-        final_data.extend(extract_entries(text))
-        with open(f'txts/column_{index}.txt', 'w', encoding='utf-8') as f:
-            f.write(text)
-        index += 1
+            text = clean_ocr_text(text)
+            parsed = extract_entries(text, nagar_parishad, prabhag_kr, yaadi_bhaag_kr, booth_address)
+            final_data.extend(parsed)
+            with open(f'txts/column_{index}.txt', 'w', encoding='utf-8') as f:
+                f.write(text)
+            index += 1
 
-# Save only final CSV
-with open("voter_data.csv", "w", newline="", encoding="utf-8") as f:
-    writer = csv.DictWriter(f, fieldnames=["नाव", "वडिलांचे नाव", "पतीचे नाव", "घर क्रमांक", "वय", "लिंग"])
-    writer.writeheader()
-    writer.writerows(final_data)
+    # Save only final CSV
+    with open("voter_data.csv", "w", newline="", encoding="utf-8") as f:
+        # writer = csv.DictWriter(f, fieldnames=["नाव", "वडिलांचे नाव", "पतीचे नाव", "घर क्रमांक", "वय", "लिंग"])
+        writer = csv.DictWriter(f, fieldnames=["Name", "Father Name", "Husband Name", "House Number", "Age", "Gender", "Nagar_Parishad", "Prabhag_kr", "Yaadi_bhaag_kr", "Booth_address"])
+        writer.writeheader()
+        writer.writerows(final_data)
 
-print(f"✅ Done! Extracted {len(final_data)} records from memory, no files saved.")
-
-
-
-# from pdf2image import convert_from_path
-# from PIL import Image
-# import pytesseract
-# import io
-# import re
-# import csv
-
-# def preprocess_and_crop_columns(page_image):
-#     w, h = page_image.size
-#     margin = 30  # crop 30px from all sides
-#     cropped = page_image.crop((margin, margin, w - margin, h - margin))
-#     col_width = cropped.width // 3
-#     return [
-#         cropped.crop((i * col_width, 0, (i + 1) * col_width, cropped.height))
-#         for i in range(3)
-#     ]
-
-# def extract_entries(text):
-#     entries = re.split(r"(?:^|\n)\s*नाव\s*[:：]?\s*", text)[1:]
-#     parsed = []
-#     for entry in entries:
-#         name = entry.splitlines()[0].strip()
-#         father = re.search(r"वडिलांचे नाव[:：]?\s*([^\n]+)", entry)
-#         husband = re.search(r"पतीचे नाव[:：]?\s*([^\n]+)", entry)
-#         house = re.search(r"घर क्रमांक[:：]?\s*([^\n]+)", entry)
-#         age = re.search(r"वय[:：]?\s*(\d{1,3})", entry)
-#         gender = re.search(r"लिंग[:：]?\s*([^\n]+)", entry)
-
-#         parsed.append({
-#             "नाव": name,
-#             "वडिलांचे नाव": father.group(1).strip() if father else "",
-#             "पतीचे नाव": husband.group(1).strip() if husband else "",
-#             "घर क्रमांक": house.group(1).strip() if house else "",
-#             "वय": age.group(1) if age else "",
-#             "लिंग": gender.group(1).strip() if gender else "",
-#         })
-#     return parsed
-
-# # Load all pages from the PDF
-# pdf_path = "raw pdfs\shortened.pdf"
-# pages = convert_from_path(pdf_path, dpi=300)[2:3]
-
-# final_data = []
-
-# for page in pages:
-#     columns = preprocess_and_crop_columns(page)
-#     for col_img in columns:
-#         text = pytesseract.image_to_string(col_img, lang='mar')
-#         final_data.extend(extract_entries(text))
-
-# # Save only final CSV
-# with open("test.csv", "w", newline="", encoding="utf-8") as f:
-#     writer = csv.DictWriter(f, fieldnames=["नाव", "वडिलांचे नाव", "पतीचे नाव", "घर क्रमांक", "वय", "लिंग"])
-#     writer.writeheader()
-#     writer.writerows(final_data)
-
-# print(f"✅ Done! Extracted {len(final_data)} records from memory, no files saved.")
+    print(f"✅ Done! Extracted {len(final_data)} records from memory, no files saved.")
