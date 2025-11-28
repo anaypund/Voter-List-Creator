@@ -10,8 +10,8 @@ def preprocess_and_crop_columns(page_image):
     w, h = page_image.size
 
     # Set custom margins
-    top_margin = 120
-    bottom_margin = 100
+    top_margin = 320
+    bottom_margin = 150
     left_margin = 50
     right_margin = 80
 
@@ -216,42 +216,43 @@ def preprocess_image(image):
 if __name__ == '__main__':
 
     # Load all pages from the PDF
-    pdf_path = "raw pdfs/FinalList_Ward_2-short.pdf"
-    print(f"Loading pdf {pdf_path}")
-    pages = convert_from_path(pdf_path, dpi=300)
-    print("loaded pdf")
+    pdf_path_list = ["raw pdfs/FinalList_Ward_2.pdf", "raw pdfs/FinalList_Ward_3.pdf", "raw pdfs/FinalList_Ward_4.pdf"]
+    for pdf_idx, pdf_path in enumerate(pdf_path_list):
+        print(f"Loading pdf {pdf_path}")
+        pages = convert_from_path(pdf_path, dpi=300)[2:-1]
+        print("loaded pdf")
 
-    final_data = []
+        final_data = []
 
-    index =1
-    for idx, page in enumerate(pages, start=1):
-        print(page)
-        # Check Header
-        header = extract_header(page)
-        header.save(f"imgs/Header_{idx}.png")
-        header_text = pytesseract.image_to_string(header, lang='Devanagari+mar')
-        nagar_parishad, prabhag_kr, yaadi_bhaag_kr, booth_address = process_header(header_text)
-        
-        columns = preprocess_and_crop_columns(page)
-        for col_img in columns:
-            # col_img = preprocess_image(col_img)
-            # col_img = artificially_expand_line_spacing(col_img)
-            text = pytesseract.image_to_string(col_img, lang='Devanagari')
+        index =1
+        for idx, page in enumerate(pages, start=1):
+            print(idx)
+            # Check Header
+            header = extract_header(page)
+            # header.save(f"imgs/Header_{idx}.png")
+            header_text = pytesseract.image_to_string(header, lang='Devanagari+mar')
+            nagar_parishad, prabhag_kr, yaadi_bhaag_kr, booth_address = process_header(header_text)
+            
+            columns = preprocess_and_crop_columns(page)
+            for col_img in columns:
+                # col_img = preprocess_image(col_img)
+                # col_img = artificially_expand_line_spacing(col_img)
+                text = pytesseract.image_to_string(col_img, lang='Devanagari')
 
-            col_img.save(f"imgs/debug_column_{index}.png")
+                # col_img.save(f"imgs/debug_column_{index}.png")
 
-            text = clean_ocr_text(text)
-            parsed = extract_entries(text, nagar_parishad, prabhag_kr, yaadi_bhaag_kr, booth_address)
-            final_data.extend(parsed)
-            with open(f'txts/column_{index}.txt', 'w', encoding='utf-8') as f:
-                f.write(text)
-            index += 1
+                text = clean_ocr_text(text)
+                parsed = extract_entries(text, nagar_parishad, prabhag_kr, yaadi_bhaag_kr, booth_address)
+                final_data.extend(parsed)
+                # with open(f'txts/column_{index}.txt', 'w', encoding='utf-8') as f:
+                #     f.write(text)
+                index += 1
 
-    # Save only final CSV
-    with open("voter_data.csv", "w", newline="", encoding="utf-8") as f:
-        # writer = csv.DictWriter(f, fieldnames=["नाव", "वडिलांचे नाव", "पतीचे नाव", "घर क्रमांक", "वय", "लिंग"])
-        writer = csv.DictWriter(f, fieldnames=["Name", "Father Name", "Husband Name", "House Number", "Age", "Gender", "Nagar_Parishad", "Prabhag_kr", "Yaadi_bhaag_kr", "Booth_address"])
-        writer.writeheader()
-        writer.writerows(final_data)
+        # Save only final CSV
+        with open(f"voter_ward_{pdf_idx}.csv", "w", newline="", encoding="utf-8") as f:
+            # writer = csv.DictWriter(f, fieldnames=["नाव", "वडिलांचे नाव", "पतीचे नाव", "घर क्रमांक", "वय", "लिंग"])
+            writer = csv.DictWriter(f, fieldnames=["Name", "Father Name", "Husband Name", "House Number", "Age", "Gender", "Nagar_Parishad", "Prabhag_kr", "Yaadi_bhaag_kr", "Booth_address"])
+            writer.writeheader()
+            writer.writerows(final_data)
 
-    print(f"✅ Done! Extracted {len(final_data)} records from memory, no files saved.")
+        print(f"✅ Done! Extracted {len(final_data)} records from memory, no files saved.")
